@@ -585,10 +585,7 @@ public:
          }
       }
 
-      // TAA Detection (only if we haven't found TAA yet)
-      if (!shader_hashes_TAA.Empty())
-         return nullptr;
-
+      // TAA Detection (allow collecting all candidates, do not stop on first)
       TAAShaderInfo taa_shader_info = {};
       bool is_taa_candidate = IsUE4TAACandidate(code, size, shader_hash, taa_shader_info) && FindShaderInfo(code, size, taa_shader_info);
       if (is_taa_candidate)
@@ -749,6 +746,13 @@ public:
          return DrawOrDispatchOverrideType::None;
 
       uint64_t shader_hash = is_compute_shader ? original_shader_hashes.compute_shaders[0] : original_shader_hashes.pixel_shaders[0];
+
+      // Grounded: Force selection of Primary TAAU (0x3DE48FAE) and ignore secondary/half-res passes (e.g. 0x2B0A560F)
+      constexpr uint64_t GROUNDED_PRIMARY_TAA_HASH = 0x3DE48FAE;
+      if (shader_hash != GROUNDED_PRIMARY_TAA_HASH)
+      {
+         return DrawOrDispatchOverrideType::None;
+      }
       TAAShaderInfo taa_shader_info;
       {
          std::shared_lock taa_lock(taa_mutex);
@@ -962,7 +966,16 @@ public:
             D3D11_VIEWPORT viewport;
             uint32_t num_viewports = 1;
             native_device_context->RSGetViewports(&num_viewports, &viewport);
-            
+
+            D3D11_RECT scissor_rects[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+            uint32_t num_scissor_rects = ARRAYSIZE(scissor_rects);
+            native_device_context->RSGetScissorRects(&num_scissor_rects, scissor_rects);
+            std::string scissor_info = "none";
+            if (num_scissor_rects > 0)
+            {
+               scissor_info = std::format("{}x{} at ({},{})", scissor_rects[0].right - scissor_rects[0].left, scissor_rects[0].bottom - scissor_rects[0].top, scissor_rects[0].left, scissor_rects[0].top);
+            }
+
             uint2 real_input_res = { (UINT)std::lrintf(game_device_data.render_resolution.x), (UINT)std::lrintf(game_device_data.render_resolution.y) };
             if (game_device_data.detected_input_resolution.x > 0 && game_device_data.detected_input_resolution.y > 0)
             {
@@ -978,7 +991,7 @@ public:
             const uint2 sr_output_size = { taa_output_texture_desc.Width, taa_output_texture_desc.Height };
             const bool sr_output_is_partial = false;
 
-            reshade::log::message(reshade::log::level::info, std::format("[Grounded DIAG] TAA Output: {}x{}, InRes: {}x{} (scale {:.2f}), VP: {:.1f}x{:.1f}, Jitter: ({:.5f}, {:.5f})", taa_output_texture_desc.Width, taa_output_texture_desc.Height, real_input_res.x, real_input_res.y, (float)device_data.sr_render_resolution_scale, viewport.Width, viewport.Height, game_device_data.jitter.x, game_device_data.jitter.y).c_str());
+            reshade::log::message(reshade::log::level::info, std::format("[Grounded DIAG 0x{:08X}] TAA Output RTV: {}x{} (fmt {}), InRes: {}x{} (scale {:.2f}), VP: {:.1f}x{:.1f} at ({:.1f},{:.1f}), Scissor: {}, Jitter: ({:.5f}, {:.5f})", (uint32_t)shader_hash, taa_output_texture_desc.Width, taa_output_texture_desc.Height, (uint32_t)taa_output_texture_desc.Format, real_input_res.x, real_input_res.y, (float)device_data.sr_render_resolution_scale, viewport.Width, viewport.Height, viewport.TopLeftX, viewport.TopLeftY, scissor_info, game_device_data.jitter.x, game_device_data.jitter.y).c_str());
 
             SR::SettingsData settings_data;
             settings_data.output_width = sr_output_size.x;
