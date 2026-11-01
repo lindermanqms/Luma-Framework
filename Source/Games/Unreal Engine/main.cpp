@@ -126,6 +126,7 @@ struct GameDeviceDataUnrealEngine final : public GameDeviceData
    // What SR drew this frame, re-used by other TAA passes of the same view (same source color)
    com_ptr<ID3D11Resource> sr_drawn_source;
    com_ptr<ID3D11Texture2D> sr_drawn_output; // The TAA output or "sr_output_color"
+   uint2 detected_input_resolution = {};
    uint2 sr_drawn_size = {};
 #endif // ENABLE_SR
    float4 render_resolution = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -790,8 +791,11 @@ public:
 
             if (std::fabs(output_aspect_ratio - swapchain_aspect_ratio) > FLT_EPSILON)
                continue;
-            if (desc.Width < device_data.render_resolution.x || desc.Height < device_data.render_resolution.y)
+            // Allow sub-resolution textures (e.g. 2580x1080 at 75% render scale)
+            if (desc.Width < 32 || desc.Height < 32)
                continue;
+
+            game_device_data.detected_input_resolution = {desc.Width, desc.Height};
 
             switch (desc.Format)
             {
@@ -958,20 +962,29 @@ public:
             D3D11_VIEWPORT viewport;
             uint32_t num_viewports = 1;
             native_device_context->RSGetViewports(&num_viewports, &viewport);
-            // game_device_data.viewport_rect         = {viewport.TopLeftX, viewport.TopLeftY, viewport.Width, viewport.Height};
-            // game_device_data.render_resolution     = {(float)taa_output_texture_desc.Width, (float)taa_output_texture_desc.Height, 1.0f / (float)taa_output_texture_desc.Width, 1.0f / (float)taa_output_texture_desc.Height};
-            device_data.sr_render_resolution_scale = 1.0f; // DLAA only
+            
+            uint2 real_input_res = { (UINT)std::lrintf(game_device_data.render_resolution.x), (UINT)std::lrintf(game_device_data.render_resolution.y) };
+            if (game_device_data.detected_input_resolution.x > 0 && game_device_data.detected_input_resolution.y > 0)
+            {
+               real_input_res = game_device_data.detected_input_resolution;
+            }
+            else if (viewport.Width > 32.0f && viewport.Height > 32.0f)
+            {
+               real_input_res = { (UINT)std::lrintf(viewport.Width), (UINT)std::lrintf(viewport.Height) };
+            }
 
-            const uint2 sr_output_size = GetSROutputSize(native_device_context, game_device_data, is_compute_shader, taa_shader_info, taa_output_texture_desc);
-            const bool sr_output_is_partial = sr_output_size != uint2{taa_output_texture_desc.Width, taa_output_texture_desc.Height}; // SR then writes into a copy of the output area
+            device_data.sr_render_resolution_scale = (float)real_input_res.x / (float)taa_output_texture_desc.Width;
 
-            reshade::log::message(reshade::log::level::info, std::format("[Grounded DIAG] TAA Output: {}x{}, VP: {:.1f}x{:.1f} at ({:.1f},{:.1f}), RenderRes: {:.1f}x{:.1f}, SROutputSize: {}x{}, Jitter: ({:.5f}, {:.5f})", taa_output_texture_desc.Width, taa_output_texture_desc.Height, viewport.Width, viewport.Height, viewport.TopLeftX, viewport.TopLeftY, game_device_data.render_resolution.x, game_device_data.render_resolution.y, sr_output_size.x, sr_output_size.y, game_device_data.jitter.x, game_device_data.jitter.y).c_str());
+            const uint2 sr_output_size = { taa_output_texture_desc.Width, taa_output_texture_desc.Height };
+            const bool sr_output_is_partial = false;
+
+            reshade::log::message(reshade::log::level::info, std::format("[Grounded DIAG] TAA Output: {}x{}, InRes: {}x{} (scale {:.2f}), VP: {:.1f}x{:.1f}, Jitter: ({:.5f}, {:.5f})", taa_output_texture_desc.Width, taa_output_texture_desc.Height, real_input_res.x, real_input_res.y, (float)device_data.sr_render_resolution_scale, viewport.Width, viewport.Height, game_device_data.jitter.x, game_device_data.jitter.y).c_str());
 
             SR::SettingsData settings_data;
             settings_data.output_width = sr_output_size.x;
             settings_data.output_height = sr_output_size.y;
-            settings_data.render_width = game_device_data.render_resolution.x;
-            settings_data.render_height = game_device_data.render_resolution.y;
+            settings_data.render_width = real_input_res.x;
+            settings_data.render_height = real_input_res.y;
             settings_data.dynamic_resolution = true;
             settings_data.hdr = true; // Unreal Engine does DLSS before tonemapping, in HDR linear space
             settings_data.inverted_depth = true;
@@ -1114,6 +1127,8 @@ public:
                draw_data.near_plane = game_device_data.near_plane / 100.0f;
                draw_data.far_plane = FLT_MAX; // TODO: made up values
                draw_data.vert_fov = game_device_data.fov_y;
+               draw_data.render_width = real_input_res.x;
+               draw_data.render_height = real_input_res.y;
 
                bool dlss_succeeded = sr_implementations[device_data.sr_type]->Draw(sr_instance_data, native_device_context, draw_data);
                draw_state_stack.Restore(native_device_context);
