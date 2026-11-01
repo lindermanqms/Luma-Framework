@@ -786,6 +786,8 @@ public:
             float output_aspect_ratio = static_cast<float>(desc.Width) / static_cast<float>(desc.Height);
             float swapchain_aspect_ratio = device_data.render_resolution.x / device_data.render_resolution.y;
 
+            reshade::log::message(reshade::log::level::info, std::format("[Grounded DIAG] Slot {}: {}x{}, fmt={}, aspect={:.4f} vs swapchain={:.4f} (ref {}x{})", i, desc.Width, desc.Height, (uint32_t)desc.Format, output_aspect_ratio, swapchain_aspect_ratio, (uint32_t)device_data.render_resolution.x, (uint32_t)device_data.render_resolution.y).c_str());
+
             if (std::fabs(output_aspect_ratio - swapchain_aspect_ratio) > FLT_EPSILON)
                continue;
             if (desc.Width < device_data.render_resolution.x || desc.Height < device_data.render_resolution.y)
@@ -962,6 +964,8 @@ public:
 
             const uint2 sr_output_size = GetSROutputSize(native_device_context, game_device_data, is_compute_shader, taa_shader_info, taa_output_texture_desc);
             const bool sr_output_is_partial = sr_output_size != uint2{taa_output_texture_desc.Width, taa_output_texture_desc.Height}; // SR then writes into a copy of the output area
+
+            reshade::log::message(reshade::log::level::info, std::format("[Grounded DIAG] TAA Output: {}x{}, VP: {:.1f}x{:.1f} at ({:.1f},{:.1f}), RenderRes: {:.1f}x{:.1f}, SROutputSize: {}x{}, Jitter: ({:.5f}, {:.5f})", taa_output_texture_desc.Width, taa_output_texture_desc.Height, viewport.Width, viewport.Height, viewport.TopLeftX, viewport.TopLeftY, game_device_data.render_resolution.x, game_device_data.render_resolution.y, sr_output_size.x, sr_output_size.y, game_device_data.jitter.x, game_device_data.jitter.y).c_str());
 
             SR::SettingsData settings_data;
             settings_data.output_width = sr_output_size.x;

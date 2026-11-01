@@ -2,9 +2,10 @@ name: Build and Release Luma Mods
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, grounded-sr-instrumentation ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 # A new push to a pull request cancels its previous run. Each push to main gets its own group, so main runs never wait for or cancel each other.
 concurrency:
